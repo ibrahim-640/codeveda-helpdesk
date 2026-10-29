@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HelpDesk</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>HelpDesk</h1>
+      <p>Support ticket system</p>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>New ticket</h2>
+        <form id="ticket-form">
+          <label>Title
+            <input id="title" required maxlength="100" />
+          </label>
+          <label>Description
+            <textarea id="description" rows="3" required></textarea>
+          </label>
+          <label>Priority
+            <select id="priority">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <button type="submit">Create ticket</button>
+          <p id="form-message" role="status"></p>
+        </form>
+      </section>
+
+      <section>
+        <h2>Tickets</h2>
+        <p id="list-message" role="status"></p>
+        <div id="ticket-list" class="grid"></div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
