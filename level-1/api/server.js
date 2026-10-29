@@ -1,20 +1,16 @@
 const express = require("express");
-
+const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
-
+app.use(express.static(path.join(__dirname, "..", "frontend")));
 // In-memory storage (temporary)
 let tickets = [];
 let nextId = 1;
 
 const PRIORITIES = ["low", "medium", "high"];
 const STATUSES = ["open", "in_progress", "resolved", "closed"];
-
-app.get("/", (req, res) => {
-  res.json({ message: "HelpDesk API is running" });
-});
 
 // Read all tickets
 app.get("/tickets", (req, res) => {
