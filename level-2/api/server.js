@@ -4,6 +4,7 @@ const path = require("path");
 const express = require("express");
 const mongoose = require("mongoose");
 const Ticket = require("./models/Ticket");
+const Comment = require("./models/Comment");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,15 +25,6 @@ app.param("id", (req, res, next, id) => {
   next();
 });
 
-// Read all tickets (newest first)
-app.get(
-  "/tickets",
-  asyncHandler(async (req, res) => {
-    const tickets = await Ticket.find().sort({ createdAt: -1 });
-    res.json(tickets);
-  })
-);
-
 // Create a ticket
 app.post(
   "/tickets",
@@ -43,6 +35,30 @@ app.post(
   })
 );
 
+// Read all tickets (newest first), optional ?status= and ?priority= filters
+app.get(
+  "/tickets",
+  asyncHandler(async (req, res) => {
+    const filter = {};
+
+    for (const field of ["status", "priority"]) {
+      const value = req.query[field];
+      if (value === undefined) continue;
+
+      // Must be a plain string: blocks tricks like ?status[$ne]=open
+      const allowed = Ticket.schema.path(field).enumValues;
+      if (typeof value !== "string" || !allowed.includes(value)) {
+        return res
+          .status(400)
+          .json({ error: `${field} must be one of: ${allowed.join(", ")}` });
+      }
+      filter[field] = value;
+    }
+
+    const tickets = await Ticket.find(filter).sort({ createdAt: -1 });
+    res.json(tickets);
+  })
+);
 // Read one ticket
 app.get(
   "/tickets/:id",
@@ -52,7 +68,6 @@ app.get(
     res.json(ticket);
   })
 );
-
 // Update a ticket (send only the fields you want to change)
 app.put(
   "/tickets/:id",
@@ -74,13 +89,44 @@ app.put(
   })
 );
 
-// Delete a ticket
+// Delete a ticket and its comments
 app.delete(
   "/tickets/:id",
   asyncHandler(async (req, res) => {
     const ticket = await Ticket.findByIdAndDelete(req.params.id);
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+    await Comment.deleteMany({ ticket: ticket._id });
     res.status(204).send();
+  })
+);
+// List comments for a ticket (oldest first)
+app.get(
+  "/tickets/:id/comments",
+  asyncHandler(async (req, res) => {
+    const exists = await Ticket.exists({ _id: req.params.id });
+    if (!exists) return res.status(404).json({ error: "Ticket not found" });
+
+    const comments = await Comment.find({ ticket: req.params.id }).sort({
+      createdAt: 1,
+    });
+    res.json(comments);
+  })
+);
+
+// Add a comment to a ticket
+app.post(
+  "/tickets/:id/comments",
+  asyncHandler(async (req, res) => {
+    const exists = await Ticket.exists({ _id: req.params.id });
+    if (!exists) return res.status(404).json({ error: "Ticket not found" });
+
+    const { authorName, text } = req.body ?? {};
+    const comment = await Comment.create({
+      ticket: req.params.id,
+      authorName,
+      text,
+    });
+    res.status(201).json(comment);
   })
 );
 

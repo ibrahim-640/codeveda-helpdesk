@@ -38,7 +38,10 @@ const ticketSchema = new mongoose.Schema(
   },
   { timestamps: true } // adds createdAt and updatedAt automatically
 );
-
+// Indexes: speed up filtering by status/priority and sorting newest first
+ticketSchema.index({ status: 1, priority: 1, createdAt: -1 });
+ticketSchema.index({ createdAt: -1 });
+ticketSchema.index({ status: 1, createdAt: -1 });
 // MongoDB uses _id. Expose it as "id" so the frontend keeps working.
 ticketSchema.set("toJSON", {
   virtuals: true,
