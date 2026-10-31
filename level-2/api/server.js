@@ -5,12 +5,16 @@ const express = require("express");
 const mongoose = require("mongoose");
 const Ticket = require("./models/Ticket");
 const Comment = require("./models/Comment");
+const cookieParser = require("cookie-parser");
+const authRoutes = require("./routes/auth");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
 
 app.use(express.json());
+app.use(cookieParser());
+app.use("/auth", authRoutes);
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 
 // Wraps async handlers so any error goes to the error handler
@@ -144,10 +148,16 @@ app.use((err, req, res, next) => {
     const messages = Object.values(err.errors).map((e) => e.message);
     return res.status(400).json({ error: messages.join(", ") });
   }
+  if (err.code === 11000) {
+    return res.status(409).json({ error: "That email is already registered" });
+  }
   console.error(err);
   res.status(500).json({ error: "Internal server error" });
 });
-
+  if (!process.env.JWT_SECRET) {
+    console.error("JWT_SECRET is missing from .env");
+    process.exit(1);
+  }
 // Connect to the database first, then start listening
 async function start() {
   try {
