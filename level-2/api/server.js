@@ -3,10 +3,14 @@ require("dotenv").config();
 const path = require("path");
 const express = require("express");
 const mongoose = require("mongoose");
+const cookieParser = require("cookie-parser");
+
 const Ticket = require("./models/Ticket");
 const Comment = require("./models/Comment");
-const cookieParser = require("cookie-parser");
+const User = require("./models/User");
 const authRoutes = require("./routes/auth");
+const userRoutes = require("./routes/users");
+const { requireAuth, requireRole } = require("./middleware/auth");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,8 +18,10 @@ const MONGODB_URI = process.env.MONGODB_URI;
 
 app.use(express.json());
 app.use(cookieParser());
-app.use("/auth", authRoutes);
 app.use(express.static(path.join(__dirname, "..", "frontend")));
+
+app.use("/auth", authRoutes);
+app.use("/users", userRoutes);
 
 // Wraps async handlers so any error goes to the error handler
 const asyncHandler = (fn) => (req, res, next) =>
@@ -29,19 +35,29 @@ app.param("id", (req, res, next, id) => {
   next();
 });
 
-// Create a ticket
-app.post(
-  "/tickets",
-  asyncHandler(async (req, res) => {
-    const { title, description, priority } = req.body ?? {};
-    const ticket = await Ticket.create({ title, description, priority });
-    res.status(201).json(ticket);
-  })
-);
+const POPULATE_TICKET = [
+  { path: "createdBy", select: "name email" },
+  { path: "assignedTo", select: "name email" },
+];
 
-// Read all tickets (newest first), optional ?status= and ?priority= filters
+const isStaff = (user) => user.role === "agent" || user.role === "admin";
+
+// Loads a ticket if the current user may see it; otherwise sends a 404
+async function findAccessibleTicket(req, res) {
+  const ticket = await Ticket.findById(req.params.id);
+  const owns = ticket && String(ticket.createdBy) === String(req.user._id);
+  if (!ticket || (!isStaff(req.user) && !owns)) {
+    res.status(404).json({ error: "Ticket not found" });
+    return null;
+  }
+  return ticket;
+}
+
+// Read tickets (newest first). Customers only see their own.
+// Optional ?status= and ?priority= filters.
 app.get(
   "/tickets",
+  requireAuth,
   asyncHandler(async (req, res) => {
     const filter = {};
 
@@ -59,24 +75,53 @@ app.get(
       filter[field] = value;
     }
 
-    const tickets = await Ticket.find(filter).sort({ createdAt: -1 });
+    if (!isStaff(req.user)) filter.createdBy = req.user._id;
+
+    const tickets = await Ticket.find(filter)
+      .sort({ createdAt: -1 })
+      .populate(POPULATE_TICKET);
     res.json(tickets);
   })
 );
+
+// Create a ticket (any logged-in user). The owner comes from the login,
+// never from the request body.
+app.post(
+  "/tickets",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { title, description, priority } = req.body ?? {};
+    const ticket = await Ticket.create({
+      title,
+      description,
+      priority,
+      createdBy: req.user._id,
+    });
+    await ticket.populate(POPULATE_TICKET);
+    res.status(201).json(ticket);
+  })
+);
+
 // Read one ticket
 app.get(
   "/tickets/:id",
+  requireAuth,
   asyncHandler(async (req, res) => {
-    const ticket = await Ticket.findById(req.params.id);
-    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+    const ticket = await findAccessibleTicket(req, res);
+    if (!ticket) return;
+    await ticket.populate(POPULATE_TICKET);
     res.json(ticket);
   })
 );
-// Update a ticket (send only the fields you want to change)
+
+// Update a ticket (agents and admins). Only admins can assign.
 app.put(
   "/tickets/:id",
+  requireAuth,
+  requireRole("agent", "admin"),
   asyncHandler(async (req, res) => {
-    const { title, description, priority, status } = req.body ?? {};
+    const { title, description, priority, status, assignedTo } =
+      req.body ?? {};
 
     const updates = {};
     if (title !== undefined) updates.title = title;
@@ -84,18 +129,45 @@ app.put(
     if (priority !== undefined) updates.priority = priority;
     if (status !== undefined) updates.status = status;
 
+    if (assignedTo !== undefined) {
+      if (req.user.role !== "admin") {
+        return res
+          .status(403)
+          .json({ error: "Only admins can assign tickets" });
+      }
+      if (assignedTo === null) {
+        updates.assignedTo = null; // unassign
+      } else {
+        if (
+          typeof assignedTo !== "string" ||
+          !mongoose.isValidObjectId(assignedTo)
+        ) {
+          return res.status(400).json({ error: "Invalid assignedTo id" });
+        }
+        const assignee = await User.findById(assignedTo);
+        if (!assignee || assignee.role === "customer") {
+          return res
+            .status(400)
+            .json({ error: "assignedTo must be an agent or admin" });
+        }
+        updates.assignedTo = assignee._id;
+      }
+    }
+
     const ticket = await Ticket.findByIdAndUpdate(req.params.id, updates, {
       new: true, // return the updated document
       runValidators: true, // apply schema rules to updates too
-    });
+    }).populate(POPULATE_TICKET);
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
     res.json(ticket);
   })
 );
 
-// Delete a ticket and its comments
+// Delete a ticket and its comments (admins only)
 app.delete(
   "/tickets/:id",
+  requireAuth,
+  requireRole("admin"),
   asyncHandler(async (req, res) => {
     const ticket = await Ticket.findByIdAndDelete(req.params.id);
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
@@ -103,33 +175,37 @@ app.delete(
     res.status(204).send();
   })
 );
+
 // List comments for a ticket (oldest first)
 app.get(
   "/tickets/:id/comments",
+  requireAuth,
   asyncHandler(async (req, res) => {
-    const exists = await Ticket.exists({ _id: req.params.id });
-    if (!exists) return res.status(404).json({ error: "Ticket not found" });
+    const ticket = await findAccessibleTicket(req, res);
+    if (!ticket) return;
 
-    const comments = await Comment.find({ ticket: req.params.id }).sort({
-      createdAt: 1,
-    });
+    const comments = await Comment.find({ ticket: ticket._id })
+      .sort({ createdAt: 1 })
+      .populate("author", "name role");
     res.json(comments);
   })
 );
 
-// Add a comment to a ticket
+// Add a comment to a ticket. The author comes from the login.
 app.post(
   "/tickets/:id/comments",
+  requireAuth,
   asyncHandler(async (req, res) => {
-    const exists = await Ticket.exists({ _id: req.params.id });
-    if (!exists) return res.status(404).json({ error: "Ticket not found" });
+    const ticket = await findAccessibleTicket(req, res);
+    if (!ticket) return;
 
-    const { authorName, text } = req.body ?? {};
+    const { text } = req.body ?? {};
     const comment = await Comment.create({
-      ticket: req.params.id,
-      authorName,
+      ticket: ticket._id,
+      author: req.user._id,
       text,
     });
+    await comment.populate("author", "name role");
     res.status(201).json(comment);
   })
 );
@@ -154,12 +230,13 @@ app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: "Internal server error" });
 });
+
+// Connect to the database first, then start listening
+async function start() {
   if (!process.env.JWT_SECRET) {
     console.error("JWT_SECRET is missing from .env");
     process.exit(1);
   }
-// Connect to the database first, then start listening
-async function start() {
   try {
     await mongoose.connect(MONGODB_URI);
     console.log("Connected to MongoDB");

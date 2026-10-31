@@ -8,12 +8,10 @@ const commentSchema = new mongoose.Schema(
       ref: "Ticket",
       required: [true, "ticket is required"],
     },
-    authorName: {
-      type: String,
-      required: [true, "authorName is required"],
-      trim: true,
-      minlength: [2, "authorName must be at least 2 characters"],
-      maxlength: [50, "authorName must be at most 50 characters"],
+      author: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: [true, "author is required"],
     },
     text: {
       type: String,

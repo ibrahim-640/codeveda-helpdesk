@@ -35,13 +35,25 @@ const ticketSchema = new mongoose.Schema(
       },
       default: "open",
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: [true, "createdBy is required"],
+    },
+    assignedTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
   },
   { timestamps: true } // adds createdAt and updatedAt automatically
 );
-// Indexes: speed up filtering by status/priority and sorting newest first
-ticketSchema.index({ status: 1, priority: 1, createdAt: -1 });
+
+// Indexes: speed up filtering and sorting newest first
 ticketSchema.index({ createdAt: -1 });
 ticketSchema.index({ status: 1, createdAt: -1 });
+ticketSchema.index({ createdBy: 1, createdAt: -1 });
+
 // MongoDB uses _id. Expose it as "id" so the frontend keeps working.
 ticketSchema.set("toJSON", {
   virtuals: true,
