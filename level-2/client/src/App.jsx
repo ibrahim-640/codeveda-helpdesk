@@ -1,7 +1,9 @@
 import { Route, Routes } from "react-router";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
-import Home from "./pages/Home";
+import NewTicket from "./pages/NewTicket";
+import TicketDetail from "./pages/TicketDetail";
+import Tickets from "./pages/Tickets";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 
@@ -14,9 +16,11 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
 
-          {/* Everything inside needs a login */}
+                    {/* Everything inside needs a login */}
           <Route element={<ProtectedRoute />}>
-            <Route path="/" element={<Home />} />
+            <Route path="/" element={<Tickets />} />
+            <Route path="/tickets/new" element={<NewTicket />} />
+            <Route path="/tickets/:id" element={<TicketDetail />} />
           </Route>
 
           <Route path="*" element={<p>Page not found.</p>} />
