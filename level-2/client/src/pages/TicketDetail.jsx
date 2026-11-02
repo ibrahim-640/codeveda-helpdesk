@@ -2,15 +2,19 @@ import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../api";
 import { useApi } from "../hooks/useApi";
+import { useAuth } from "../context/AuthContext";
 import Alert from "../components/Alert";
 import Badge from "../components/Badge";
 import Button from "../components/Button";
 import FormField from "../components/FormField";
+import TicketControls from "../components/TicketControls";
 
 export default function TicketDetail() {
   const { id } = useParams();
-  const { data: ticket, loading, error } = useApi(`/tickets/${id}`);
+  const { user } = useAuth();
+  const ticketQuery = useApi(`/tickets/${id}`);
   const comments = useApi(`/tickets/${id}/comments`);
+  const { data: ticket, loading, error } = ticketQuery;
 
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
@@ -74,6 +78,10 @@ export default function TicketDetail() {
           </div>
         </dl>
       </section>
+
+      {user.role !== "customer" && (
+        <TicketControls ticket={ticket} user={user} onChanged={ticketQuery.reload} />
+      )}
 
       <section className="rounded-xl bg-white p-6 shadow">
         <h2 className="mb-4 text-lg font-semibold">Comments</h2>

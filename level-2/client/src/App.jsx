@@ -6,6 +6,7 @@ import TicketDetail from "./pages/TicketDetail";
 import Tickets from "./pages/Tickets";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+import Users from "./pages/Users";
 
 export default function App() {
   return (
@@ -22,7 +23,10 @@ export default function App() {
             <Route path="/tickets/new" element={<NewTicket />} />
             <Route path="/tickets/:id" element={<TicketDetail />} />
           </Route>
-
+                    {/* Admin only: other roles are redirected to "/" */}
+          <Route element={<ProtectedRoute roles={["admin"]} />}>
+            <Route path="/users" element={<Users />} />
+          </Route>
           <Route path="*" element={<p>Page not found.</p>} />
         </Routes>
       </main>

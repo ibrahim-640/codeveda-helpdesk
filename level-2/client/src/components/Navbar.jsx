@@ -8,9 +8,16 @@ export default function Navbar() {
   return (
     <header className="bg-blue-900 text-white">
       <nav className="mx-auto flex max-w-4xl items-center justify-between gap-3 p-4">
-        <Link to="/" className="text-lg font-bold">
-          HelpDesk
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link to="/" className="text-lg font-bold">
+            HelpDesk
+          </Link>
+          {user?.role === "admin" && (
+            <Link to="/users" className="text-sm hover:underline">
+              Users
+            </Link>
+          )}
+        </div>
 
         {user ? (
           <div className="flex items-center gap-2 text-sm sm:gap-3">
