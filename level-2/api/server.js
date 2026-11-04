@@ -1,6 +1,4 @@
 require("dotenv").config();
-
-const path = require("path");
 const express = require("express");
 const mongoose = require("mongoose");
 const cookieParser = require("cookie-parser");
@@ -18,7 +16,6 @@ const MONGODB_URI = process.env.MONGODB_URI;
 
 app.use(express.json());
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, "..", "frontend")));
 
 app.use("/auth", authRoutes);
 app.use("/users", userRoutes);
