@@ -17,6 +17,8 @@ const notificationRoutes = require("./routes/notifications");
 const { requireAuth, requireRole } = require("./middleware/auth");
 const { initSockets, emitToTicket } = require("./socket");
 const { notify } = require("./notify");
+const compression = require("compression");
+const helmet = require("helmet");
 
 const app = express();
 const server = http.createServer(app);
@@ -25,6 +27,16 @@ initSockets(server);
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
 
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      // Not needed (the app has no http subresources) and it breaks some browsers on localhost
+      directives: { "upgrade-insecure-requests": null },
+    },
+  })
+);
+app.use(compression());
 app.use(express.json());
 app.use(cookieParser());
 
@@ -64,8 +76,8 @@ async function findAccessibleTicket(req, res) {
   return ticket;
 }
 
-// Read tickets (newest first). Customers only see their own.
-// Optional ?status= and ?priority= filters.
+// Read tickets (newest first), one page at a time. Customers only see their own.
+// Optional ?status= and ?priority= filters, plus ?page= and ?limit= (max 50).
 api.get(
   "/tickets",
   requireAuth,
@@ -86,12 +98,38 @@ api.get(
       filter[field] = value;
     }
 
+    // Page and limit must be positive whole numbers
+    const nums = {};
+    for (const [name, fallback, max] of [
+      ["page", 1, Infinity],
+      ["limit", 10, 50],
+    ]) {
+      const raw = req.query[name];
+      if (raw === undefined) {
+        nums[name] = fallback;
+        continue;
+      }
+      if (typeof raw !== "string" || !/^[1-9]\d{0,5}$/.test(raw)) {
+        return res
+          .status(400)
+          .json({ error: `${name} must be a positive whole number` });
+      }
+      nums[name] = Math.min(Number(raw), max);
+    }
+
     if (!isStaff(req.user)) filter.createdBy = req.user._id;
 
-    const tickets = await Ticket.find(filter)
+    const total = await Ticket.countDocuments(filter);
+    const pages = Math.max(1, Math.ceil(total / nums.limit));
+    const page = Math.min(nums.page, pages); // asking past the end returns the last page
+
+    const items = await Ticket.find(filter)
       .sort({ createdAt: -1 })
+      .skip((page - 1) * nums.limit)
+      .limit(nums.limit)
       .populate(POPULATE_TICKET);
-    res.json(tickets);
+
+    res.json({ items, page, limit: nums.limit, total, pages });
   })
 );
 
