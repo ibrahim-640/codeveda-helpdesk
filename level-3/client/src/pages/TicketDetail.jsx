@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../api";
+import { socket } from "../socket";
 import { useApi } from "../hooks/useApi";
 import { useAuth } from "../context/AuthContext";
 import Alert from "../components/Alert";
@@ -9,25 +10,64 @@ import Button from "../components/Button";
 import FormField from "../components/FormField";
 import TicketControls from "../components/TicketControls";
 
+// Adds a comment unless it's already there (own post + live event can both arrive)
+const addUnique = (list, comment) =>
+  list?.some((c) => c.id === comment.id) ? list : [...(list ?? []), comment];
+
 export default function TicketDetail() {
   const { id } = useParams();
   const { user } = useAuth();
   const ticketQuery = useApi(`/tickets/${id}`);
   const comments = useApi(`/tickets/${id}/comments`);
   const { data: ticket, loading, error } = ticketQuery;
+  const { mutate: mutateTicket, reload: reloadTicket } = ticketQuery;
+  const { mutate: mutateComments, reload: reloadComments } = comments;
 
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState("");
+
+  // Live updates: join this ticket's room while the page is open
+  useEffect(() => {
+    const join = () => socket.emit("ticket:join", id);
+    const onComment = (comment) => {
+      if (comment.ticket === id) mutateComments((list) => addUnique(list, comment));
+    };
+    const onTicket = (updated) => {
+      if (updated.id === id) mutateTicket(() => updated);
+    };
+    // After a dropped connection events may have been missed, so refetch
+    const onReconnect = () => {
+      reloadTicket();
+      reloadComments();
+    };
+
+    if (socket.connected) join();
+    socket.on("connect", join); // rooms are lost on reconnect, so join again
+    socket.on("comment:new", onComment);
+    socket.on("ticket:updated", onTicket);
+    socket.io.on("reconnect", onReconnect);
+
+    return () => {
+      socket.emit("ticket:leave", id);
+      socket.off("connect", join);
+      socket.off("comment:new", onComment);
+      socket.off("ticket:updated", onTicket);
+      socket.io.off("reconnect", onReconnect);
+    };
+  }, [id, mutateTicket, mutateComments, reloadTicket, reloadComments]);
 
   async function addComment(e) {
     e.preventDefault();
     setPostError("");
     setPosting(true);
     try {
-      await api(`/tickets/${id}/comments`, { method: "POST", body: { text } });
+      const created = await api(`/tickets/${id}/comments`, {
+        method: "POST",
+        body: { text },
+      });
       setText("");
-      comments.reload();
+      mutateComments((list) => addUnique(list, created));
     } catch (err) {
       setPostError(err.message);
     } finally {
@@ -80,7 +120,7 @@ export default function TicketDetail() {
       </section>
 
       {user.role !== "customer" && (
-        <TicketControls ticket={ticket} user={user} onChanged={ticketQuery.reload} />
+        <TicketControls ticket={ticket} user={user} onChanged={reloadTicket} />
       )}
 
       <section className="rounded-xl bg-white p-6 shadow">

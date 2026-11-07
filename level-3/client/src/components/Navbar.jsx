@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { useAuth } from "../context/AuthContext";
 import Button from "./Button";
+import NotificationBell from "./NotificationBell";
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -21,6 +22,7 @@ export default function Navbar() {
 
         {user ? (
           <div className="flex items-center gap-2 text-sm sm:gap-3">
+            <NotificationBell />
             <span className="hidden sm:inline">{user.name}</span>
             <span className="rounded-full bg-blue-700 px-2 py-0.5 text-xs uppercase">
               {user.role}

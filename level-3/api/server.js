@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const fs = require("fs");
+const http = require("http");
 const path = require("path");
 const express = require("express");
 const mongoose = require("mongoose");
@@ -8,12 +9,19 @@ const cookieParser = require("cookie-parser");
 
 const Ticket = require("./models/Ticket");
 const Comment = require("./models/Comment");
+const Notification = require("./models/Notification");
 const User = require("./models/User");
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/users");
+const notificationRoutes = require("./routes/notifications");
 const { requireAuth, requireRole } = require("./middleware/auth");
+const { initSockets, emitToTicket } = require("./socket");
+const { notify } = require("./notify");
 
 const app = express();
+const server = http.createServer(app);
+initSockets(server);
+
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
 
@@ -24,6 +32,7 @@ app.use(cookieParser());
 const api = express.Router();
 api.use("/auth", authRoutes);
 api.use("/users", userRoutes);
+api.use("/notifications", notificationRoutes);
 
 // Wraps async handlers so any error goes to the error handler
 const asyncHandler = (fn) => (req, res, next) =>
@@ -122,6 +131,9 @@ api.put(
   requireAuth,
   requireRole("agent", "admin"),
   asyncHandler(async (req, res) => {
+    const before = await Ticket.findById(req.params.id);
+    if (!before) return res.status(404).json({ error: "Ticket not found" });
+
     const { title, description, priority, status, assignedTo } =
       req.body ?? {};
 
@@ -161,11 +173,37 @@ api.put(
       runValidators: true, // apply schema rules to updates too
     }).populate(POPULATE_TICKET);
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+
+    // Tell the people affected (notify() skips the person making the change)
+    if (updates.status !== undefined && updates.status !== before.status) {
+      notify({
+        actor: req.user,
+        ticket,
+        recipients: [ticket.createdBy?._id],
+        type: "status",
+        message: `${req.user.name} changed "${ticket.title}" to ${updates.status.replace("_", " ")}`,
+      });
+    }
+    if (
+      updates.assignedTo &&
+      String(updates.assignedTo) !== String(before.assignedTo)
+    ) {
+      notify({
+        actor: req.user,
+        ticket,
+        recipients: [updates.assignedTo],
+        type: "assigned",
+        message: `${req.user.name} assigned you to "${ticket.title}"`,
+      });
+    }
+
+    // Anyone with this ticket open sees the change live
+    emitToTicket(ticket.id, "ticket:updated", ticket.toJSON());
     res.json(ticket);
   })
 );
 
-// Delete a ticket and its comments (admins only)
+// Delete a ticket, its comments and its notifications (admins only)
 api.delete(
   "/tickets/:id",
   requireAuth,
@@ -173,7 +211,10 @@ api.delete(
   asyncHandler(async (req, res) => {
     const ticket = await Ticket.findByIdAndDelete(req.params.id);
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
-    await Comment.deleteMany({ ticket: ticket._id });
+    await Promise.all([
+      Comment.deleteMany({ ticket: ticket._id }),
+      Notification.deleteMany({ ticket: ticket._id }),
+    ]);
     res.status(204).send();
   })
 );
@@ -208,6 +249,17 @@ api.post(
       text,
     });
     await comment.populate("author", "name role");
+
+    // The ticket's owner and assignee hear about it (never the commenter)
+    notify({
+      actor: req.user,
+      ticket,
+      recipients: [ticket.createdBy, ticket.assignedTo],
+      type: "comment",
+      message: `${req.user.name} commented on "${ticket.title}"`,
+    });
+
+    emitToTicket(ticket.id, "comment:new", comment.toJSON());
     res.status(201).json(comment);
   })
 );
@@ -260,7 +312,7 @@ async function start() {
   try {
     await mongoose.connect(MONGODB_URI);
     console.log("Connected to MongoDB");
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });
   } catch (err) {
