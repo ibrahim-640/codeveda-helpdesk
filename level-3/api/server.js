@@ -90,7 +90,16 @@ api.get("/health", (req, res) => {
 });
 
 // TEMPORARY: remove after checking the proxy setup on the live site
-api.get("/ip", (req, res) => res.send(req.ip));
+api.get("/ip", (req, res) =>
+  res.json({
+    ip: req.ip,
+    ips: req.ips,
+    forwardedFor: req.headers["x-forwarded-for"] || null,
+    socket: req.socket.remoteAddress,
+    trustProxy: req.app.get("trust proxy"),
+    nodeEnv: process.env.NODE_ENV,
+  })
+);
 
 api.use(apiLimiter);
 api.post("/auth/login", loginLimiter);
