@@ -6,6 +6,8 @@ const path = require("path");
 const express = require("express");
 const mongoose = require("mongoose");
 const cookieParser = require("cookie-parser");
+const rateLimitModule = require("express-rate-limit");
+const rateLimit = rateLimitModule.rateLimit || rateLimitModule;
 
 const Ticket = require("./models/Ticket");
 const Comment = require("./models/Comment");
@@ -21,6 +23,9 @@ const compression = require("compression");
 const helmet = require("helmet");
 
 const app = express();
+// Behind Render's proxy the real client IP arrives in X-Forwarded-For.
+// Without this, every visitor would look like the same IP to the rate limiter.
+if (process.env.NODE_ENV === "production") app.set("trust proxy", 1);
 const server = http.createServer(app);
 initSockets(server);
 
@@ -37,11 +42,59 @@ app.use(
   })
 );
 app.use(compression());
-app.use(express.json());
+app.use(express.json({ limit: "10kb" })); // tickets and comments are small, so reject huge bodies
 app.use(cookieParser());
 
 // Every API route lives under /api
 const api = express.Router();
+
+const tooMany = (what) => ({
+  error: `Too many ${what}. Please wait a few minutes and try again.`,
+});
+
+// General cap for the whole API
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: tooMany("requests"),
+});
+
+// Only FAILED logins count, so normal users are never affected
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: tooMany("login attempts"),
+});
+
+const signupLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: tooMany("sign-up attempts"),
+});
+
+// Health check: before the limiter and with no login, so monitors can poll it
+api.get("/health", (req, res) => {
+  const dbUp = mongoose.connection.readyState === 1;
+  res.status(dbUp ? 200 : 503).json({
+    status: dbUp ? "ok" : "unavailable",
+    database: dbUp ? "connected" : "disconnected",
+    uptimeSeconds: Math.round(process.uptime()),
+  });
+});
+
+// TEMPORARY: remove after checking the proxy setup on the live site
+api.get("/ip", (req, res) => res.send(req.ip));
+
+api.use(apiLimiter);
+api.post("/auth/login", loginLimiter);
+api.post("/auth/signup", signupLimiter);
 api.use("/auth", authRoutes);
 api.use("/users", userRoutes);
 api.use("/notifications", notificationRoutes);
@@ -330,6 +383,9 @@ app.use((err, req, res, next) => {
   if (err.type === "entity.parse.failed") {
     return res.status(400).json({ error: "Invalid JSON in request body" });
   }
+  if (err.type === "entity.too.large") {
+    return res.status(413).json({ error: "Request body too large" });
+  }
   if (err.name === "ValidationError") {
     const messages = Object.values(err.errors).map((e) => e.message);
     return res.status(400).json({ error: messages.join(", ") });
@@ -343,8 +399,9 @@ app.use((err, req, res, next) => {
 
 // Connect to the database first, then start listening
 async function start() {
-  if (!process.env.JWT_SECRET) {
-    console.error("JWT_SECRET is missing from .env");
+  const missing = ["MONGODB_URI", "JWT_SECRET"].filter((k) => !process.env[k]);
+  if (missing.length) {
+    console.error(`Missing environment variables: ${missing.join(", ")}`);
     process.exit(1);
   }
   try {
