@@ -7,14 +7,27 @@ import Button from "../components/Button";
 import TicketCard from "../components/TicketCard";
 
 const FILTERS = ["all", "open", "in_progress", "resolved", "closed"];
+const PAGE_SIZE = 10;
 
 export default function Tickets() {
   const { user } = useAuth();
   const isStaff = user.role !== "customer";
 
   const [status, setStatus] = useState("all");
-  const path = status === "all" ? "/tickets" : `/tickets?status=${status}`;
-  const { data: tickets, loading, error } = useApi(path);
+  const [page, setPage] = useState(1);
+
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(PAGE_SIZE),
+  });
+  if (status !== "all") params.set("status", status);
+
+  const { data, loading, error } = useApi(`/tickets?${params}`);
+
+  function changeFilter(next) {
+    setStatus(next);
+    setPage(1); // a new filter always starts from the first page
+  }
 
   return (
     <div>
@@ -34,7 +47,7 @@ export default function Tickets() {
             key={f}
             type="button"
             variant={status === f ? "primary" : "ghost"}
-            onClick={() => setStatus(f)}
+            onClick={() => changeFilter(f)}
             className="px-3 py-1 capitalize"
           >
             {f.replace("_", " ")}
@@ -45,17 +58,41 @@ export default function Tickets() {
       {loading && <p className="text-slate-500">Loading tickets...</p>}
       <Alert>{error && `Could not load tickets: ${error.message}`}</Alert>
 
-      {tickets && tickets.length === 0 && (
+      {data && data.total === 0 && (
         <p className="rounded-xl bg-white p-6 text-center text-slate-500 shadow">
           {status === "all" ? "No tickets yet." : "No tickets match this filter."}
         </p>
       )}
 
-      {tickets && tickets.length > 0 && (
+      {data && data.items.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-2">
-          {tickets.map((t) => (
+          {data.items.map((t) => (
             <TicketCard key={t.id} ticket={t} showOwner={isStaff} />
           ))}
+        </div>
+      )}
+
+      {data && data.pages > 1 && (
+        <div className="mt-6 flex items-center justify-between">
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={data.page <= 1}
+            onClick={() => setPage(data.page - 1)}
+          >
+            Previous
+          </Button>
+          <span className="text-sm text-slate-600">
+            Page {data.page} of {data.pages} · {data.total} tickets
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={data.page >= data.pages}
+            onClick={() => setPage(data.page + 1)}
+          >
+            Next
+          </Button>
         </div>
       )}
     </div>
