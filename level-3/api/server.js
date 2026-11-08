@@ -25,7 +25,7 @@ const helmet = require("helmet");
 const app = express();
 // Behind Render's proxy the real client IP arrives in X-Forwarded-For.
 // Without this, every visitor would look like the same IP to the rate limiter.
-if (process.env.NODE_ENV === "production") app.set("trust proxy", 1);
+if (process.env.NODE_ENV === "production") app.set("trust proxy", 3);
 const server = http.createServer(app);
 initSockets(server);
 
