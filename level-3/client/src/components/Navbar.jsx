@@ -14,9 +14,14 @@ export default function Navbar() {
             HelpDesk
           </Link>
           {user?.role === "admin" && (
-            <Link to="/users" className="text-sm hover:underline">
-              Users
-            </Link>
+            <>
+              <Link to="/users" className="text-sm hover:underline">
+                Users
+              </Link>
+              <Link to="/stats" className="text-sm hover:underline">
+                Stats
+              </Link>
+            </>
           )}
         </div>
 
