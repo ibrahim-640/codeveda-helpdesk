@@ -45,6 +45,9 @@ const ticketSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    resolvedAt: { 
+      type: Date, default: null 
+    },
   },
   { timestamps: true } // adds createdAt and updatedAt automatically
 );

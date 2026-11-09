@@ -231,6 +231,12 @@ api.put(
     if (description !== undefined) updates.description = description;
     if (priority !== undefined) updates.priority = priority;
     if (status !== undefined) updates.status = status;
+        // Track when a ticket is finished, for the stats page
+    if (status !== undefined) {
+      const done = status === "resolved" || status === "closed";
+      if (done && !before.resolvedAt) updates.resolvedAt = new Date();
+      if (!done) updates.resolvedAt = null; // reopened
+    }
 
     if (assignedTo !== undefined) {
       if (req.user.role !== "admin") {
@@ -352,7 +358,117 @@ api.post(
     res.status(201).json(comment);
   })
 );
+// Dashboard numbers for admins, computed in one aggregation pass
+api.get(
+  "/stats",
+  requireAuth,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const ACTIVE = ["open", "in_progress"];
+    const STATUSES = Ticket.schema.path("status").enumValues;
+    const PRIORITIES = Ticket.schema.path("priority").enumValues;
 
+    // Midnight (UTC) six days ago, so the chart covers today plus 6 days
+    const since = new Date();
+    since.setUTCHours(0, 0, 0, 0);
+    since.setUTCDate(since.getUTCDate() - 6);
+
+    const [facets] = await Ticket.aggregate([
+      {
+        $facet: {
+          byStatus: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
+          byPriority: [{ $group: { _id: "$priority", count: { $sum: 1 } } }],
+          unassigned: [
+            { $match: { assignedTo: null, status: { $in: ACTIVE } } },
+            { $count: "count" },
+          ],
+          resolution: [
+            { $match: { resolvedAt: { $ne: null } } },
+            {
+              $group: {
+                _id: null,
+                avgMs: { $avg: { $subtract: ["$resolvedAt", "$createdAt"] } },
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          byAgent: [
+            { $match: { assignedTo: { $ne: null } } },
+            {
+              $group: {
+                _id: "$assignedTo",
+                assigned: { $sum: 1 },
+                active: { $sum: { $cond: [{ $in: ["$status", ACTIVE] }, 1, 0] } },
+              },
+            },
+          ],
+          perDay: [
+            { $match: { createdAt: { $gte: since } } },
+            {
+              $group: {
+                _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                count: { $sum: 1 },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    // Turn grouped rows into { key: count } with zeros for missing keys
+    const toMap = (rows, keys) =>
+      Object.fromEntries(
+        keys.map((k) => [k, rows.find((r) => r._id === k)?.count ?? 0])
+      );
+    const byStatus = toMap(facets.byStatus, STATUSES);
+    const byPriority = toMap(facets.byPriority, PRIORITIES);
+
+    const perDay = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(since);
+      d.setUTCDate(since.getUTCDate() + i);
+      const date = d.toISOString().slice(0, 10);
+      perDay.push({
+        date,
+        count: facets.perDay.find((r) => r._id === date)?.count ?? 0,
+      });
+    }
+
+    // Every staff member is listed, including those with nothing assigned
+    const staff = await User.find({ role: { $in: ["agent", "admin"] } }).select(
+      "name role"
+    );
+    const agents = staff
+      .map((u) => {
+        const row = facets.byAgent.find((r) => String(r._id) === String(u._id));
+        return {
+          id: u.id,
+          name: u.name,
+          role: u.role,
+          assigned: row?.assigned ?? 0,
+          active: row?.active ?? 0,
+        };
+      })
+      .sort((a, b) => b.active - a.active || a.name.localeCompare(b.name));
+
+    const resolution = facets.resolution[0];
+    res.json({
+      totals: {
+        total: Object.values(byStatus).reduce((a, b) => a + b, 0),
+        active: byStatus.open + byStatus.in_progress,
+        unassigned: facets.unassigned[0]?.count ?? 0,
+        resolved: resolution?.count ?? 0,
+        avgResolutionHours: resolution
+          ? Math.round((resolution.avgMs / 3600000) * 10) / 10
+          : null,
+      },
+      byStatus,
+      byPriority,
+      agents,
+      perDay,
+    });
+  })
+);
 // Unknown API routes get a JSON 404
 api.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
