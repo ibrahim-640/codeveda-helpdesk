@@ -530,4 +530,7 @@ async function start() {
   }
 }
 
-start();
+// Only start listening when run directly (node server.js), not when tests import the app
+if (require.main === module) start();
+
+module.exports = { app, server };
