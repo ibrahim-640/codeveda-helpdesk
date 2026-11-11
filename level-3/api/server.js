@@ -302,7 +302,8 @@ api.put(
 api.delete(
   "/tickets/:id",
   requireAuth,
-  requireRole("admin"),
+requireRole("admin"),
+
   asyncHandler(async (req, res) => {
     const ticket = await Ticket.findByIdAndDelete(req.params.id);
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
