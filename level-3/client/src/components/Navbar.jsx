@@ -7,7 +7,7 @@ export default function Navbar() {
   const { user, logout } = useAuth();
 
   return (
-    <header className="bg-blue-900 text-white">
+    <header className="relative bg-blue-900 text-white">
       <nav className="mx-auto flex max-w-4xl items-center justify-between gap-3 p-4">
         <div className="flex items-center gap-4">
           <Link to="/" className="text-lg font-bold">

@@ -8,19 +8,19 @@ export default function NotificationBell() {
   const ref = useRef(null);
   const navigate = useNavigate();
 
-  // Close on outside click or Escape
+  // Close on outside tap or click, and on Escape
   useEffect(() => {
     if (!open) return undefined;
-    const onClick = (e) => {
+    const onPointer = (e) => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
     };
     const onKey = (e) => {
       if (e.key === "Escape") setOpen(false);
     };
-    document.addEventListener("mousedown", onClick);
+    document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
@@ -32,12 +32,16 @@ export default function NotificationBell() {
   }
 
   return (
-    <div className="relative" ref={ref}>
+    // On phones the panel positions itself against the navbar (this wrapper is
+    // static); from sm upwards it positions itself against the bell.
+    <div className="sm:relative" ref={ref}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label={`Notifications, ${unreadCount} unread`}
-        className="relative rounded-full p-1.5 hover:bg-blue-800"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className="relative rounded-full p-2 hover:bg-blue-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -55,18 +59,26 @@ export default function NotificationBell() {
           />
         </svg>
         {unreadCount > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white">
+          <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white">
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-10 mt-2 w-80 max-w-[85vw] rounded-lg bg-white text-slate-900 shadow-lg">
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
-            <span className="text-sm font-semibold">
+        <div
+          role="dialog"
+          aria-label="Notifications"
+          className="absolute inset-x-2 top-full z-20 mt-1 overflow-hidden rounded-lg bg-white text-slate-900 shadow-xl ring-1 ring-slate-200 sm:inset-x-auto sm:right-0 sm:w-96"
+        >
+          <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+            <span className="text-base font-semibold">
               Notifications{" "}
-              <span className={`text-xs font-normal ${connected ? "text-green-600" : "text-slate-400"}`}>
+              <span
+                className={`text-xs font-normal ${
+                  connected ? "text-green-700" : "text-slate-500"
+                }`}
+              >
                 {connected ? "· Live" : "· Offline"}
               </span>
             </span>
@@ -74,7 +86,7 @@ export default function NotificationBell() {
               <button
                 type="button"
                 onClick={markAllRead}
-                className="text-xs text-blue-600 hover:underline"
+                className="rounded px-2 py-1 text-sm text-blue-700 hover:bg-blue-50"
               >
                 Mark all read
               </button>
@@ -82,23 +94,42 @@ export default function NotificationBell() {
           </div>
 
           {items.length === 0 ? (
-            <p className="px-4 py-6 text-center text-sm text-slate-500">
+            <p className="px-4 py-8 text-center text-sm text-slate-600">
               Nothing yet.
             </p>
           ) : (
-            <ul className="max-h-80 overflow-y-auto">
+            <ul className="max-h-[60vh] divide-y divide-slate-100 overflow-y-auto overscroll-contain sm:max-h-96">
               {items.map((n) => (
                 <li key={n.id}>
                   <button
                     type="button"
                     onClick={() => openNotification(n)}
-                    className={`block w-full px-4 py-3 text-left text-sm hover:bg-slate-50 ${
-                      n.read ? "text-slate-500" : "bg-blue-50 font-medium"
+                    className={`block w-full px-4 py-3 text-left hover:bg-slate-50 ${
+                      n.read ? "text-slate-600" : "bg-blue-50 text-slate-900"
                     }`}
                   >
-                    {n.message}
-                    <span className="mt-0.5 block text-xs font-normal text-slate-400">
-                      {new Date(n.createdAt).toLocaleString()}
+                    <span className="flex items-start gap-2">
+                      <span
+                        aria-hidden="true"
+                        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                          n.read ? "bg-transparent" : "bg-blue-600"
+                        }`}
+                      />
+                      <span className="min-w-0">
+                        <span
+                          className={`block break-words text-sm leading-snug ${
+                            n.read ? "" : "font-semibold"
+                          }`}
+                        >
+                          {n.message}
+                        </span>
+                        <span className="mt-1 block text-xs text-slate-500">
+                          {new Date(n.createdAt).toLocaleString([], {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          })}
+                        </span>
+                      </span>
                     </span>
                   </button>
                 </li>
